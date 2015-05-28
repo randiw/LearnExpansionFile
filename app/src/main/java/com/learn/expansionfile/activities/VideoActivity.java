@@ -5,7 +5,11 @@ import android.os.Bundle;
 import android.widget.MediaController;
 import android.widget.VideoView;
 
+import com.android.vending.expansion.zipfile.APKExpansionSupport;
+import com.android.vending.expansion.zipfile.ZipResourceFile;
 import com.learn.expansionfile.R;
+
+import java.io.IOException;
 
 import butterknife.InjectView;
 import butterknife.OnClick;
