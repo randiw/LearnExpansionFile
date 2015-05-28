@@ -1,0 +1,2 @@
+include ':app'
+include ':play_licensing'
