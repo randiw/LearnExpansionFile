@@ -1,2 +1,4 @@
 include ':app'
 include ':play_licensing'
+include ':zip_file'
+include ':downloader_library'
