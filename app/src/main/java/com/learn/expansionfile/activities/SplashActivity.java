@@ -25,8 +25,15 @@ import com.google.android.vending.expansion.downloader.IDownloaderClient;
 import com.google.android.vending.expansion.downloader.IDownloaderService;
 import com.google.android.vending.expansion.downloader.IStub;
 import com.learn.expansionfile.R;
+import com.learn.expansionfile.events.PostExecuteEvent;
+import com.learn.expansionfile.events.PreExecuteEvent;
+import com.learn.expansionfile.events.ProgressUpdateEvent;
+import com.learn.expansionfile.helper.BusProvider;
+import com.learn.expansionfile.helper.XAPKFile;
 import com.learn.expansionfile.provider.ZipContentProvider;
 import com.learn.expansionfile.services.MyDownloaderService;
+import com.learn.expansionfile.task.ValidateXAPKTask;
+import com.squareup.otto.Subscribe;
 
 import io.fabric.sdk.android.Fabric;
 import java.io.DataInputStream;
@@ -42,8 +49,6 @@ import butterknife.OnClick;
 public class SplashActivity extends BaseActivity implements IDownloaderClient {
 
     public static final String TAG = SplashActivity.class.getSimpleName();
-
-    private static final float SMOOTHING_FACTOR = 0.005f;
 
     private static final XAPKFile[] xAPKS = {
             new XAPKFile(true, ZipContentProvider.MAIN_VERSION, ZipContentProvider.MAIN_FILE_SIZE)
@@ -61,9 +66,9 @@ public class SplashActivity extends BaseActivity implements IDownloaderClient {
     @InjectView(R.id.wifiSettingsButton) Button wifiSettingsButton;
 
     private boolean isStatePaused;
-    private boolean cancelValidation;
     private int state;
 
+    private ValidateXAPKTask validationTask;
     private IDownloaderService remoteService;
     private IStub downloaderClientStub;
 
@@ -113,6 +118,18 @@ public class SplashActivity extends BaseActivity implements IDownloaderClient {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        BusProvider.getInstance().register(this);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        BusProvider.getInstance().unregister(this);
+    }
+
+    @Override
     protected void onStop() {
         if(null != downloaderClientStub) {
             downloaderClientStub.disconnect(this);
@@ -122,7 +139,9 @@ public class SplashActivity extends BaseActivity implements IDownloaderClient {
 
     @Override
     protected void onDestroy() {
-        this.cancelValidation = true;
+        if(validationTask != null) {
+            validationTask.setCancelValidation(true);
+        }
         super.onDestroy();
     }
 
@@ -172,138 +191,56 @@ public class SplashActivity extends BaseActivity implements IDownloaderClient {
         return true;
     }
 
+    @Subscribe
+    public void onPreExecuteEvent(PreExecuteEvent event) {
+        dashboard.setVisibility(View.VISIBLE);
+        cellMessage.setVisibility(View.GONE);
+        statusText.setText(R.string.text_verifying_download);
+        pauseButton.setText(R.string.text_button_cancel_verify);
+        pauseButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if(validationTask != null) {
+                    validationTask.setCancelValidation(true);
+                }
+            }
+        });
+    }
+
+    @Subscribe
+    public void onProgressUpdateEvent(ProgressUpdateEvent event) {
+        onDownloadProgress(event.progressInfo);
+    }
+
+    @Subscribe
+    public void onPostExecuteEvent(PostExecuteEvent event) {
+        if(event.result) {
+            dashboard.setVisibility(View.VISIBLE);
+            cellMessage.setVisibility(View.GONE);
+            statusText.setText(R.string.text_validation_complete);
+            pauseButton.setText(android.R.string.ok);
+            pauseButton.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    startActivity(new Intent(SplashActivity.this, MainActivity.class));
+                }
+            });
+        } else {
+            dashboard.setVisibility(View.VISIBLE);
+            cellMessage.setVisibility(View.GONE);
+            statusText.setText(R.string.text_validation_failed);
+            pauseButton.setText(android.R.string.cancel);
+            pauseButton.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    finish();
+                }
+            });
+        }
+    }
+
     private void validateXAPKZipFiles() {
-        AsyncTask<Object, DownloadProgressInfo, Boolean> validationTask = new AsyncTask<Object, DownloadProgressInfo, Boolean>() {
-
-            @Override
-            protected void onPreExecute() {
-                dashboard.setVisibility(View.VISIBLE);
-                cellMessage.setVisibility(View.GONE);
-                statusText.setText(R.string.text_verifying_download);
-                pauseButton.setText(R.string.text_button_cancel_verify);
-                pauseButton.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        cancelValidation = true;
-                    }
-                });
-                super.onPreExecute();
-            }
-
-            @Override
-            protected Boolean doInBackground(Object... params) {
-                for(XAPKFile xf : xAPKS) {
-                    String fileName = Helpers.getExpansionAPKFileName(SplashActivity.this, xf.isMain, xf.fileVersion);
-                    if(!Helpers.doesFileExist(SplashActivity.this, fileName, xf.fileSize, false)) {
-                        return false;
-                    }
-
-                    fileName = Helpers.generateSaveFileName(SplashActivity.this, fileName);
-                    ZipResourceFile zrf;
-                    byte[] buf = new byte[1024 * 256];
-
-                    try {
-                        zrf = new ZipResourceFile(fileName);
-                        ZipResourceFile.ZipEntryRO[] entries = zrf.getAllEntries();
-
-                        long totalCompressedLength = 0;
-                        for(ZipResourceFile.ZipEntryRO entry : entries) {
-                            totalCompressedLength += entry.mCompressedLength;
-                        }
-
-                        float averageVerifySpeed = 0;
-                        long totalBytesRemaining = totalCompressedLength;
-                        long timeRemaining;
-
-                        for(ZipResourceFile.ZipEntryRO entry : entries) {
-                            if(-1 != entry.mCRC32) {
-                                long length = entry.mUncompressedLength;
-                                CRC32 crc = new CRC32();
-                                DataInputStream dis = null;
-
-                                try {
-                                    dis = new DataInputStream(zrf.getInputStream(entry.mFileName));
-
-                                    long startTime = SystemClock.uptimeMillis();
-                                    while(length > 0) {
-                                        int seek = (int) (length > buf.length ? buf.length : length);
-                                        dis.readFully(buf, 0, seek);
-                                        crc.update(buf, 0, seek);
-                                        length -= seek;
-                                        long currentTime = SystemClock.uptimeMillis();
-                                        long timePassed = currentTime - startTime;
-                                        if(timePassed > 0) {
-                                            float currentSpeedSample = (float) seek / (float) timePassed;
-                                            if(0 != averageVerifySpeed) {
-                                                averageVerifySpeed = SMOOTHING_FACTOR * currentSpeedSample + (1 - SMOOTHING_FACTOR) * averageVerifySpeed;
-                                            } else {
-                                                averageVerifySpeed = currentSpeedSample;
-                                            }
-
-                                            totalBytesRemaining -= seek;
-                                            timeRemaining = (long) (totalBytesRemaining / averageVerifySpeed);
-                                            this.publishProgress(new DownloadProgressInfo(totalCompressedLength, totalCompressedLength - totalBytesRemaining, timeRemaining, averageVerifySpeed));
-                                        }
-                                        startTime = currentTime;
-                                        if(cancelValidation) {
-                                            return true;
-                                        }
-                                    }
-
-                                    if(crc.getValue() != entry.mCRC32) {
-                                        Log.e(TAG, "CRC does not match for entry: " + entry.mFileName + " in file: " + entry.getZipFileName());
-                                        return false;
-                                    }
-                                } finally {
-                                    if(null != dis) {
-                                        dis.close();
-                                    }
-                                }
-                            }
-                        }
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                        return false;
-                    }
-                }
-                return true;
-            }
-
-            @Override
-            protected void onProgressUpdate(DownloadProgressInfo... values) {
-                onDownloadProgress(values[0]);
-                super.onProgressUpdate(values);
-            }
-
-            @Override
-            protected void onPostExecute(Boolean result) {
-                if(result) {
-                    dashboard.setVisibility(View.VISIBLE);
-                    cellMessage.setVisibility(View.GONE);
-                    statusText.setText(R.string.text_validation_complete);
-                    pauseButton.setText(android.R.string.ok);
-                    pauseButton.setOnClickListener(new View.OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-//                            finish();
-                            startActivity(new Intent(SplashActivity.this, MainActivity.class));
-                        }
-                    });
-                } else {
-                    dashboard.setVisibility(View.VISIBLE);
-                    cellMessage.setVisibility(View.GONE);
-                    statusText.setText(R.string.text_validation_failed);
-                    pauseButton.setText(android.R.string.cancel);
-                    pauseButton.setOnClickListener(new View.OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-                            finish();
-                        }
-                    });
-                }
-                super.onPostExecute(result);
-            }
-        };
+        validationTask = new ValidateXAPKTask(getApplicationContext(), xAPKS);
         validationTask.execute(new Object());
     }
 
@@ -405,18 +342,5 @@ public class SplashActivity extends BaseActivity implements IDownloaderClient {
         progressBar.setProgress((int) (progress.mOverallProgress >> 8));
         progressPercent.setText(Long.toString(progress.mOverallProgress * 100));
         progressFraction.setText(Helpers.getDownloadProgressString(progress.mOverallProgress, progress.mOverallTotal));
-    }
-
-    private static class XAPKFile {
-
-        public final boolean isMain;
-        public final int fileVersion;
-        public final long fileSize;
-
-        public XAPKFile(boolean isMain, int fileVersion, long fileSize) {
-            this.isMain = isMain;
-            this.fileVersion = fileVersion;
-            this.fileSize = fileSize;
-        }
     }
 }
