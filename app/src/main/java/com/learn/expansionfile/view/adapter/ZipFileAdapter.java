@@ -1,6 +1,7 @@
 package com.learn.expansionfile.view.adapter;
 
 import android.content.Context;
+import android.content.res.AssetFileDescriptor;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -51,8 +52,12 @@ public class ZipFileAdapter extends ArrayAdapter {
         }
 
         ZipResourceFile.ZipEntryRO entryRO = getItem(position);
-        holder.filename.setText(entryRO.getZipFileName());
-        holder.descriptor.setText(entryRO.getAssetFileDescriptor().toString());
+        holder.filename.setText(entryRO.mFileName);
+
+        AssetFileDescriptor assetFileDescriptor = entryRO.getAssetFileDescriptor();
+        if(assetFileDescriptor != null) {
+            holder.descriptor.setText(assetFileDescriptor.toString());
+        }
 
         return convertView;
     }

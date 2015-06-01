@@ -16,6 +16,7 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import com.android.vending.expansion.zipfile.ZipResourceFile;
+import com.crashlytics.android.Crashlytics;
 import com.google.android.vending.expansion.downloader.DownloadProgressInfo;
 import com.google.android.vending.expansion.downloader.DownloaderClientMarshaller;
 import com.google.android.vending.expansion.downloader.DownloaderServiceMarshaller;
@@ -24,8 +25,10 @@ import com.google.android.vending.expansion.downloader.IDownloaderClient;
 import com.google.android.vending.expansion.downloader.IDownloaderService;
 import com.google.android.vending.expansion.downloader.IStub;
 import com.learn.expansionfile.R;
+import com.learn.expansionfile.provider.ZipContentProvider;
 import com.learn.expansionfile.services.MyDownloaderService;
 
+import io.fabric.sdk.android.Fabric;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.util.zip.CRC32;
@@ -43,7 +46,7 @@ public class SplashActivity extends BaseActivity implements IDownloaderClient {
     private static final float SMOOTHING_FACTOR = 0.005f;
 
     private static final XAPKFile[] xAPKS = {
-            new XAPKFile(true, 2, 56886927L)
+            new XAPKFile(true, ZipContentProvider.MAIN_VERSION, ZipContentProvider.MAIN_FILE_SIZE)
     };
 
     @InjectView(R.id.downloaderDashboard) LinearLayout dashboard;
@@ -67,6 +70,7 @@ public class SplashActivity extends BaseActivity implements IDownloaderClient {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Fabric.with(this, new Crashlytics());
         downloaderClientStub = DownloaderClientMarshaller.CreateStub(this, MyDownloaderService.class);
         setupLayout(R.layout.activity_splash);
 

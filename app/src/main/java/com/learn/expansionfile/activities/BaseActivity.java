@@ -10,6 +10,8 @@ import butterknife.ButterKnife;
  */
 public abstract class BaseActivity extends FragmentActivity {
 
+    public static final String FILENAME = "filename";
+
     protected void setupLayout(@LayoutRes int layout) {
         setContentView(layout);
         ButterKnife.inject(this);

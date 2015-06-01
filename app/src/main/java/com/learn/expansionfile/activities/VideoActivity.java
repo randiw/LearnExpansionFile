@@ -1,15 +1,14 @@
 package com.learn.expansionfile.activities;
 
 import android.media.MediaPlayer;
+import android.net.Uri;
 import android.os.Bundle;
+import android.util.Log;
 import android.widget.MediaController;
 import android.widget.VideoView;
 
-import com.android.vending.expansion.zipfile.APKExpansionSupport;
-import com.android.vending.expansion.zipfile.ZipResourceFile;
 import com.learn.expansionfile.R;
-
-import java.io.IOException;
+import com.learn.expansionfile.provider.ZipContentProvider;
 
 import butterknife.InjectView;
 import butterknife.OnClick;
@@ -30,12 +29,21 @@ public class VideoActivity extends BaseActivity {
         super.onCreate(savedInstanceState);
         setupLayout(R.layout.activity_video);
 
+        String fileName = getIntent().getStringExtra(FILENAME);
+        Log.d(TAG, "fileName: " + fileName);
+        setupVideo(fileName);
+    }
+
+    private void setupVideo(String fileName) {
         mediaController = new MediaController(this);
         mediaController.setMediaPlayer(videoView);
         mediaController.setAnchorView(videoView);
 
+        Uri videoUri = ZipContentProvider.buildUri(fileName);
+        Log.d(TAG, "videoUri: " + videoUri.toString());
+
         videoView.setMediaController(mediaController);
-//        videoView.setVideoURI(Uri.parse(uriPath));
+        videoView.setVideoURI(videoUri);
         videoView.requestFocus();
         videoView.start();
         videoView.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
@@ -44,7 +52,6 @@ public class VideoActivity extends BaseActivity {
                 mediaController.show();
             }
         });
-
     }
 
     @OnClick(R.id.videoview)
